@@ -4,6 +4,12 @@ from types import ModuleType
 from core.youtube_downloader import YoutubeDownloader, is_youtube_url
 
 
+def _stub_ffmpeg(monkeypatch):
+    module = ModuleType("imageio_ffmpeg")
+    module.get_ffmpeg_exe = lambda: "bundled-ffmpeg"
+    monkeypatch.setitem(sys.modules, "imageio_ffmpeg", module)
+
+
 def test_is_youtube_url_matches_supported_hosts_only():
     assert is_youtube_url("https://www.youtube.com/watch?v=example")
     assert is_youtube_url("https://youtu.be/example")
@@ -13,6 +19,7 @@ def test_is_youtube_url_matches_supported_hosts_only():
 
 def test_video_quality_is_passed_to_yt_dlp(monkeypatch, tmp_path):
     captured = {}
+    _stub_ffmpeg(monkeypatch)
     monkeypatch.setattr(
         "core.youtube_downloader.get_download_directory",
         lambda filename: str(tmp_path),
@@ -45,6 +52,7 @@ def test_video_quality_is_passed_to_yt_dlp(monkeypatch, tmp_path):
         "/best[height<=720][ext=mp4][vcodec^=avc1][acodec^=mp4a]"
     )
     assert captured["options"]["merge_output_format"] == "mp4"
+    assert captured["options"]["ffmpeg_location"] == "bundled-ffmpeg"
     assert captured["options"]["outtmpl"] == str(tmp_path / "%(title)s.%(ext)s")
     assert "postprocessors" not in captured["options"]
     assert downloader.filename == "download.mp4"
@@ -52,6 +60,7 @@ def test_video_quality_is_passed_to_yt_dlp(monkeypatch, tmp_path):
 
 def test_mp3_quality_enables_audio_extraction(monkeypatch, tmp_path):
     captured = {}
+    _stub_ffmpeg(monkeypatch)
     monkeypatch.setattr(
         "core.youtube_downloader.get_download_directory",
         lambda filename: str(tmp_path),
@@ -87,4 +96,5 @@ def test_mp3_quality_enables_audio_extraction(monkeypatch, tmp_path):
         }
     ]
     assert captured["options"]["outtmpl"] == str(tmp_path / "%(title)s.%(ext)s")
+    assert captured["options"]["ffmpeg_location"] == "bundled-ffmpeg"
     assert downloader.filename == "download.mp3"

@@ -5,7 +5,6 @@ from PySide6.QtWidgets import (
     QLineEdit, QPushButton, QTableWidget, QTableWidgetItem, 
     QHeaderView, QAbstractItemView, QComboBox, QMessageBox
 )
-from PySide6.QtCore import Qt
 from core.downloader import Downloader
 from core.download_worker import DownloadWorker
 from core.download_paths import get_download_path
@@ -39,12 +38,7 @@ class MainWindow(QMainWindow):
         )
         self.quality_select.setToolTip(
             "YouTube video quality or MP3 audio. Applies to YouTube URLs only. "
-            "MP3 extraction requires FFmpeg."
-        )
-        self.quality_select.setItemData(
-            5,
-            "MP3 extraction requires FFmpeg installed and available on PATH.",
-            Qt.ToolTipRole,
+            "FFmpeg is included with the project dependencies."
         )
         self.add_btn = QPushButton("Add Download")
         self.add_btn.clicked.connect(self.handle_add_url)

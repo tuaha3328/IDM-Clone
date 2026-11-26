@@ -49,6 +49,7 @@ class YoutubeDownloader:
 
     def start_download(self, num_threads=4, progress_callback=None):
         try:
+            import imageio_ffmpeg
             from yt_dlp import YoutubeDL
 
             def progress_hook(data):
@@ -76,6 +77,7 @@ class YoutubeDownloader:
                 "continuedl": True,
                 "quiet": True,
                 "no_warnings": True,
+                "ffmpeg_location": imageio_ffmpeg.get_ffmpeg_exe(),
                 "progress_hooks": [progress_hook],
             }
             if self.quality == "MP3 audio":
