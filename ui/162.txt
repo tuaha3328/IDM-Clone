@@ -1,0 +1,13 @@
+added a Downloaded column to show how many bytes have been saved so far
+added a Total Size column to show the full file size when available
+added a Save Path column to show the complete destination path
+downloads are saved under the current user's Downloads folder
+videos and MP3/audio files are saved to Downloads\Video
+documents are saved to Downloads\Documents
+program installers are saved to Downloads\Programs
+compressed archives and ISO images are saved to Downloads\Compressed
+supports common office, ebook, installer, executable, archive, and multipart archive extensions
+other file types are saved directly to Downloads
+YouTube downloads use the destination folder for their selected media type
+YouTube videos use H.264/AAC MP4 output for better mobile and TV compatibility
+Downloaded and Total Size show the actual output file size when complete

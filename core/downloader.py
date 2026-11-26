@@ -4,6 +4,7 @@ import time
 import threading
 import requests
 from concurrent.futures import ThreadPoolExecutor
+from core.download_paths import get_download_path
 
 
 class Downloader:
@@ -63,6 +64,7 @@ class Downloader:
 
             # Safety: strip any path components from server-supplied filename
             self.filename = os.path.basename(self.filename) or "downloaded_file"
+            self.filename = get_download_path(self.filename)
             return True
         except Exception:
             return False

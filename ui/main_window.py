@@ -1,19 +1,22 @@
 import time
+import os
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
     QLineEdit, QPushButton, QTableWidget, QTableWidgetItem, 
-    QHeaderView, QAbstractItemView
+    QHeaderView, QAbstractItemView, QComboBox, QMessageBox
 )
 from PySide6.QtCore import Qt
 from core.downloader import Downloader
 from core.download_worker import DownloadWorker
+from core.download_paths import get_download_path
+from core.youtube_downloader import YoutubeDownloader, is_youtube_url
 from ui.styles import DARK_STYLE
 
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Python IDM Clone")
-        self.resize(950, 500) 
+        self.resize(1150, 560)
         
         # Track Downloader instances and Worker instances per row
         self.downloaders = {} 
@@ -30,17 +33,46 @@ class MainWindow(QMainWindow):
         self.url_input = QLineEdit()
         self.url_input.setPlaceholderText("Paste download URL here...")
         self.url_input.returnPressed.connect(self.handle_add_url)
+        self.quality_select = QComboBox()
+        self.quality_select.addItems(
+            ["Best video", "1080p", "720p", "480p", "360p", "MP3 audio"]
+        )
+        self.quality_select.setToolTip(
+            "YouTube video quality or MP3 audio. Applies to YouTube URLs only. "
+            "MP3 extraction requires FFmpeg."
+        )
+        self.quality_select.setItemData(
+            5,
+            "MP3 extraction requires FFmpeg installed and available on PATH.",
+            Qt.ToolTipRole,
+        )
         self.add_btn = QPushButton("Add Download")
         self.add_btn.clicked.connect(self.handle_add_url)
         
         top_layout.addWidget(self.url_input)
+        top_layout.addWidget(self.quality_select)
         top_layout.addWidget(self.add_btn)
         main_layout.addLayout(top_layout)
 
-        self.table = QTableWidget(0, 5)
-        self.table.setHorizontalHeaderLabels(["File Name", "Size", "Progress", "Speed", "Actions"])
-        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
-        self.table.setColumnWidth(4, 160) 
+        self.table = QTableWidget(0, 7)
+        self.table.setHorizontalHeaderLabels(
+            [
+                "File Name",
+                "Downloaded",
+                "Total Size",
+                "Progress",
+                "Speed",
+                "Save Path",
+                "Actions",
+            ]
+        )
+        self.table.setColumnWidth(0, 190)
+        self.table.setColumnWidth(1, 100)
+        self.table.setColumnWidth(2, 100)
+        self.table.setColumnWidth(3, 80)
+        self.table.setColumnWidth(4, 100)
+        self.table.horizontalHeader().setSectionResizeMode(5, QHeaderView.Stretch)
+        self.table.setColumnWidth(6, 160)
         self.table.verticalHeader().setVisible(False) 
         self.table.setEditTriggers(QAbstractItemView.NoEditTriggers) 
         main_layout.addWidget(self.table)
@@ -66,18 +98,28 @@ class MainWindow(QMainWindow):
         
         guessed_name = url.split('/')[-1].split('?')[0] or "Downloading..."
             
-        self.table.setItem(row, 0, QTableWidgetItem(guessed_name))
-        self.table.setItem(row, 1, QTableWidgetItem("--"))
-        self.table.setItem(row, 2, QTableWidgetItem("0%"))
-        self.table.setItem(row, 3, QTableWidgetItem("0 KB/s"))
-        self.table.setCellWidget(row, 4, self.create_action_buttons(row))
-        
         self.url_input.clear()
         self.row_data[row] = {"last_bytes": 0, "last_time": time.time()}
         
         # --- MERGED LOGIC: Create Downloader instance first ---
-        downloader = Downloader(url)
+        if is_youtube_url(url):
+            downloader = YoutubeDownloader(url, self.quality_select.currentText())
+        else:
+            downloader = Downloader(url)
         self.downloaders[row] = downloader
+
+        initial_path = (
+            downloader.filename
+            if is_youtube_url(url)
+            else get_download_path(guessed_name)
+        )
+        self._set_file_name(row, guessed_name)
+        self.table.setItem(row, 1, QTableWidgetItem("0 B"))
+        self.table.setItem(row, 2, QTableWidgetItem("--"))
+        self.table.setItem(row, 3, QTableWidgetItem("0%"))
+        self.table.setItem(row, 4, QTableWidgetItem("0 B/s"))
+        self._set_save_path(row, initial_path)
+        self.table.setCellWidget(row, 6, self.create_action_buttons(row))
         
         # Spawn the worker with the downloader instance
         self._spawn_worker(row)
@@ -110,66 +152,99 @@ class MainWindow(QMainWindow):
         return widget
 
     def update_progress(self, row, downloaded, total):
+        if row not in self.row_data or row not in self.downloaders:
+            return
+
+        self.table.setItem(row, 1, QTableWidgetItem(self.format_bytes(downloaded)))
+        self._set_file_name(row, os.path.basename(self.downloaders[row].filename))
+        self._set_save_path(row, self.downloaders[row].filename)
+
         if total > 0:
             percent = int((downloaded / total) * 100)
-            self.table.setItem(row, 2, QTableWidgetItem(f"{percent}%"))
-            self.table.setItem(row, 1, QTableWidgetItem(self.format_bytes(total)))
-            
-            current_time = time.time()
-            time_diff = current_time - self.row_data[row]["last_time"]
-            
-            if time_diff >= 1.0: 
-                bytes_diff = downloaded - self.row_data[row]["last_bytes"]
-                speed = bytes_diff / time_diff
-                self.table.setItem(row, 3, QTableWidgetItem(f"{self.format_bytes(speed)}/s"))
-                self.row_data[row]["last_time"] = current_time
-                self.row_data[row]["last_bytes"] = downloaded
+            self.table.setItem(row, 2, QTableWidgetItem(self.format_bytes(total)))
+            self.table.setItem(row, 3, QTableWidgetItem(f"{percent}%"))
+        else:
+            self.table.setItem(row, 2, QTableWidgetItem("Unknown"))
+
+        current_time = time.time()
+        time_diff = current_time - self.row_data[row]["last_time"]
+        if time_diff >= 1.0:
+            bytes_diff = downloaded - self.row_data[row]["last_bytes"]
+            speed = bytes_diff / time_diff
+            self.table.setItem(
+                row, 4, QTableWidgetItem(f"{self.format_bytes(speed)}/s")
+            )
+            self.row_data[row]["last_time"] = current_time
+            self.row_data[row]["last_bytes"] = downloaded
 
     def handle_pause_resume(self, row):
         if row not in self.downloaders or row not in self.workers:
             return
 
-        btn = self.table.cellWidget(row, 4).findChild(QPushButton, "pauseBtn")
+        btn = self.table.cellWidget(row, 6).findChild(QPushButton, "pauseBtn")
         
         if btn.text() == "Pause":
             # Tell the engine to pause
             self.downloaders[row].pause()
-            self.table.setItem(row, 2, QTableWidgetItem("Pausing..."))
+            self.table.setItem(row, 3, QTableWidgetItem("Pausing..."))
         else:
             # Resume: Tell the engine to resume, and spawn a new thread
             btn.setText("Pause")
-            self.table.setItem(row, 2, QTableWidgetItem("Resuming..."))
+            self.table.setItem(row, 3, QTableWidgetItem("Resuming..."))
             self._spawn_worker(row)
 
     def handle_cancel(self, row):
         if row in self.downloaders:
             self.downloaders[row].cancel()
-            self.table.setItem(row, 2, QTableWidgetItem("Cancelling..."))
+            self.table.setItem(row, 3, QTableWidgetItem("Cancelling..."))
 
     def on_download_finished(self, row, status):
         """Handles the string status returned by the friend's engine."""
-        btn = self.table.cellWidget(row, 4).findChild(QPushButton, "pauseBtn")
+        btn = self.table.cellWidget(row, 6).findChild(QPushButton, "pauseBtn")
         
         if status == "completed":
-            self.table.setItem(row, 0, QTableWidgetItem(self.downloaders[row].filename))
-            self.table.setItem(row, 2, QTableWidgetItem("100%"))
-            self.table.setItem(row, 3, QTableWidgetItem("Complete"))
-            self.table.removeCellWidget(row, 4)
+            filename = self.downloaders[row].filename
+            actual_size = os.path.getsize(filename)
+            self._set_file_name(row, os.path.basename(filename))
+            self._set_save_path(row, filename)
+            self.table.setItem(
+                row, 1, QTableWidgetItem(self.format_bytes(actual_size))
+            )
+            self.table.setItem(
+                row, 2, QTableWidgetItem(self.format_bytes(actual_size))
+            )
+            self.table.setItem(row, 3, QTableWidgetItem("100%"))
+            self.table.setItem(row, 4, QTableWidgetItem("Complete"))
+            self.table.removeCellWidget(row, 6)
             self.cleanup_row(row)
             
         elif status == "paused":
-            self.table.setItem(row, 2, QTableWidgetItem("Paused ⏸"))
+            self.table.setItem(row, 3, QTableWidgetItem("Paused ⏸"))
             if btn: btn.setText("Resume")
             
         elif status == "cancelled":
-            self.table.setItem(row, 2, QTableWidgetItem("Cancelled ❌"))
-            self.table.removeCellWidget(row, 4)
+            self.table.setItem(row, 3, QTableWidgetItem("Cancelled ❌"))
+            self.table.removeCellWidget(row, 6)
             self.cleanup_row(row)
             
         elif status == "failed":
-            self.table.setItem(row, 2, QTableWidgetItem("Failed ⚠"))
-            self.table.removeCellWidget(row, 4)
+            self.table.setItem(row, 3, QTableWidgetItem("Failed ⚠"))
+            downloader = self.downloaders[row]
+            error_message = getattr(downloader, "error_message", "")
+            if error_message:
+                QMessageBox.warning(self, "Download failed", error_message)
+            self.table.removeCellWidget(row, 6)
             self.cleanup_row(row)
+
+    def _set_file_name(self, row, filename):
+        item = QTableWidgetItem(filename)
+        item.setToolTip(filename)
+        self.table.setItem(row, 0, item)
+
+    def _set_save_path(self, row, path):
+        item = QTableWidgetItem(path)
+        item.setToolTip(path)
+        self.table.setItem(row, 5, item)
 
     def cleanup_row(self, row):
         if row in self.workers:
